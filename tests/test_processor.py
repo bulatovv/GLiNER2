@@ -32,17 +32,44 @@ from tests.fixtures.tiny_tokenizer import build_tiny_tokenizer
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tokenizer():
     extra = [
-        "[sep_struct]", "[sep_text]", "[p]", "[c]", "[e]", "[r]", "[l]",
-        "[example]", "[output]", "[description]",
-        "person", "location", "organization", "sentiment",
-        "head", "tail", "relation",
-        "field", "1", "2", "3", "4",
-        "positive", "negative", "neutral",
-        "hello", "world", "is", "great", "runs",
-        "new", "york", "city", "lives",
+        "[sep_struct]",
+        "[sep_text]",
+        "[p]",
+        "[c]",
+        "[e]",
+        "[r]",
+        "[l]",
+        "[example]",
+        "[output]",
+        "[description]",
+        "person",
+        "location",
+        "organization",
+        "sentiment",
+        "head",
+        "tail",
+        "relation",
+        "field",
+        "1",
+        "2",
+        "3",
+        "4",
+        "positive",
+        "negative",
+        "neutral",
+        "hello",
+        "world",
+        "is",
+        "great",
+        "runs",
+        "new",
+        "york",
+        "city",
+        "lives",
     ]
     return build_tiny_tokenizer(extra_words=extra)
 
@@ -76,6 +103,7 @@ def processor_no_sampling(tokenizer):
 # ===========================================================================
 # WhitespaceTokenSplitter
 # ===========================================================================
+
 
 class TestWhitespaceTokenSplitter:
     def test_basic_split(self):
@@ -148,8 +176,8 @@ class TestCharLevelSplitter:
         splitter = CharLevelSplitter()
         text = "İA"
         tokens = list(splitter(text, lower=True))
-        assert text[tokens[0][1]:tokens[0][2]] == "İ"
-        assert text[tokens[1][1]:tokens[1][2]] == "A"
+        assert text[tokens[0][1] : tokens[0][2]] == "İ"
+        assert text[tokens[1][1] : tokens[1][2]] == "A"
 
 
 class TestResolveWordSplitter:
@@ -188,15 +216,14 @@ class TestSchemaTransformerWordSplitter:
         assert isinstance(processor.word_splitter, CharLevelSplitter)
 
     def test_callable_injection(self, tokenizer):
-        processor = SchemaTransformer(
-            tokenizer=tokenizer, word_splitter=CharLevelSplitter()
-        )
+        processor = SchemaTransformer(tokenizer=tokenizer, word_splitter=CharLevelSplitter())
         assert isinstance(processor.word_splitter, CharLevelSplitter)
 
 
 # ===========================================================================
 # Token Alignment
 # ===========================================================================
+
 
 class TestTokenAlignment:
     """Verify word tokens align correctly with subword positions."""
@@ -218,7 +245,7 @@ class TestTokenAlignment:
         positions = record.text_word_first_positions
         for i in range(1, len(positions)):
             assert positions[i] > positions[i - 1], (
-                f"Position {i} ({positions[i]}) <= position {i-1} ({positions[i-1]})"
+                f"Position {i} ({positions[i]}) <= position {i - 1} ({positions[i - 1]})"
             )
 
     def test_start_end_idx_map_to_original_text(self, processor):
@@ -271,6 +298,7 @@ class TestTokenAlignment:
 # Special Token Extraction
 # ===========================================================================
 
+
 class TestSpecialTokenExtraction:
     """Verify schema special token positions are correctly identified."""
 
@@ -295,32 +323,18 @@ class TestSpecialTokenExtraction:
         assert len(record.schema_special_positions) == 1
         assert len(record.schema_special_positions[0]) == 3
 
-    def test_record_json_fields_preserve_declaration_order(
-        self,
-        processor_no_sampling,
-    ):
+    def test_record_json_fields_preserve_declaration_order(self, processor_no_sampling):
         schema = {
-            "json_structures": [{
-                "order": {
-                    "order_id": "",
-                    "quantity": "",
-                    "item": "",
-                    "total": "",
-                },
-            }],
-            "record_metadata": {
-                "order": {"mode": "natural", "anchor": "order_id"},
-            },
+            "json_structures": [
+                {"order": {"order_id": "", "quantity": "", "item": "", "total": ""}}
+            ],
+            "record_metadata": {"order": {"mode": "natural", "anchor": "order_id"}},
         }
         transformed, labels, types = [], [], []
         processor_no_sampling.is_training = False
 
         processor_no_sampling._process_json_structures(
-            schema,
-            transformed,
-            labels,
-            types,
-            sampling=None,
+            schema, transformed, labels, types, sampling=None
         )
 
         tokens = transformed[0]
@@ -331,41 +345,30 @@ class TestSpecialTokenExtraction:
         ]
         assert fields == ["order_id", "quantity", "item", "total"]
 
-    def test_relation_description_is_encoded_in_parent_prompt(
-        self,
-        processor_no_sampling,
-    ):
+    def test_relation_description_is_encoded_in_parent_prompt(self, processor_no_sampling):
         schema = {
             "relations": [{"acquired": {"head": "", "tail": ""}}],
-            "relation_descriptions": {
-                "acquired": "completed purchase of a company",
-            },
+            "relation_descriptions": {"acquired": "completed purchase of a company"},
         }
         transformed, labels, types = [], [], []
         processor_no_sampling.is_training = False
 
-        processor_no_sampling._process_relations(
-            schema,
-            transformed,
-            labels,
-            types,
-            sampling=None,
-        )
+        processor_no_sampling._process_relations(schema, transformed, labels, types, sampling=None)
 
-        assert transformed[0][2] == (
-            "acquired: completed purchase of a company"
-        )
+        assert transformed[0][2] == ("acquired: completed purchase of a company")
 
     def test_schema_special_positions_multi_schema(self, processor_no_sampling):
         """Multiple schema groups should each have their own positions list."""
         text = "Apple is great."
         schema = {
             "entities": {"company": ["Apple"]},
-            "classifications": [{
-                "task": "sentiment",
-                "labels": ["positive", "negative"],
-                "true_label": ["positive"],
-            }],
+            "classifications": [
+                {
+                    "task": "sentiment",
+                    "labels": ["positive", "negative"],
+                    "true_label": ["positive"],
+                }
+            ],
         }
         processor_no_sampling.is_training = False
         record = processor_no_sampling.transform_and_format(text, schema)
@@ -384,15 +387,11 @@ class TestSpecialTokenExtraction:
         special_ids = processor._special_ids
         for pos in record.schema_special_positions[0]:
             token_id = record.input_ids[pos]
-            assert token_id in special_ids, (
-                f"Position {pos} has id {token_id}, not a special token"
-            )
+            assert token_id in special_ids, f"Position {pos} has id {token_id}, not a special token"
 
     def test_query_marker_indices_match_schema_positions(self, processor):
         """Batch query_marker_indices should reflect schema_special_positions (minus [P])."""
-        batch_data = [
-            ("The cat sat.", {"entities": {"animal": ["cat"], "color": []}}),
-        ]
+        batch_data = [("The cat sat.", {"entities": {"animal": ["cat"], "color": []}})]
         processor.is_training = False
         batch = processor.collate_fn_inference(batch_data)
 
@@ -404,13 +403,18 @@ class TestSpecialTokenExtraction:
     def test_cls_marker_indices_for_classification(self, processor_no_sampling):
         """Classification [L] markers should appear in cls_marker_indices."""
         batch_data = [
-            ("Hello world.", {
-                "classifications": [{
-                    "task": "sentiment",
-                    "labels": ["positive", "negative", "neutral"],
-                    "true_label": ["positive"],
-                }],
-            }),
+            (
+                "Hello world.",
+                {
+                    "classifications": [
+                        {
+                            "task": "sentiment",
+                            "labels": ["positive", "negative", "neutral"],
+                            "true_label": ["positive"],
+                        }
+                    ]
+                },
+            )
         ]
         processor_no_sampling.is_training = False
         batch = processor_no_sampling.collate_fn_inference(batch_data)
@@ -422,6 +426,7 @@ class TestSpecialTokenExtraction:
 # ===========================================================================
 # SchemaTransformer End-to-End
 # ===========================================================================
+
 
 class TestSchemaTransformerE2E:
     def test_transform_entities_basic(self, processor):
@@ -437,11 +442,13 @@ class TestSchemaTransformerE2E:
     def test_transform_classification(self, processor_no_sampling):
         text = "This is great."
         schema = {
-            "classifications": [{
-                "task": "sentiment",
-                "labels": ["positive", "negative"],
-                "true_label": ["positive"],
-            }]
+            "classifications": [
+                {
+                    "task": "sentiment",
+                    "labels": ["positive", "negative"],
+                    "true_label": ["positive"],
+                }
+            ]
         }
         processor_no_sampling.is_training = False
         record = processor_no_sampling.transform_and_format(text, schema)
@@ -499,16 +506,19 @@ class TestSchemaTransformerE2E:
 # Classification Prefix
 # ===========================================================================
 
+
 class TestClassificationPrefix:
     def test_prefix_creates_choice_tokens(self, processor_no_sampling):
         """JSON structures with choices should produce a prefix."""
         schema = {
-            "json_structures": [{
-                "report": {
-                    "sentiment": {"value": "positive", "choices": ["positive", "negative"]},
-                    "text": "Hello",
+            "json_structures": [
+                {
+                    "report": {
+                        "sentiment": {"value": "positive", "choices": ["positive", "negative"]},
+                        "text": "Hello",
+                    }
                 }
-            }]
+            ]
         }
         prefix = processor_no_sampling._build_classification_prefix(schema)
         assert len(prefix) > 0
@@ -517,11 +527,9 @@ class TestClassificationPrefix:
     def test_selection_wrapping(self, processor_no_sampling):
         """Values with choices should be wrapped with [selection] prefix."""
         schema = {
-            "json_structures": [{
-                "report": {
-                    "mood": {"value": "happy", "choices": ["happy", "sad"]},
-                }
-            }]
+            "json_structures": [
+                {"report": {"mood": {"value": "happy", "choices": ["happy", "sad"]}}}
+            ]
         }
         processor_no_sampling._wrap_classification_fields(schema, ["dummy"])
         val = schema["json_structures"][0]["report"]["mood"]
@@ -531,6 +539,7 @@ class TestClassificationPrefix:
 # ===========================================================================
 # Batch Device Transfer
 # ===========================================================================
+
 
 class TestBatchDeviceTransfer:
     def test_to_preserves_shape(self, processor):
@@ -542,13 +551,9 @@ class TestBatchDeviceTransfer:
         assert moved.input_ids.shape == batch.input_ids.shape
 
     @pytest.mark.parametrize("floating_dtype", [torch.float16, torch.bfloat16])
-    def test_to_preserves_every_integer_and_boolean_dtype(
-        self, processor, floating_dtype
-    ):
+    def test_to_preserves_every_integer_and_boolean_dtype(self, processor, floating_dtype):
         processor.is_training = False
-        batch = processor.collate_fn_inference(
-            [("The cat.", {"entities": {"animal": ["cat"]}})]
-        )
+        batch = processor.collate_fn_inference([("The cat.", {"entities": {"animal": ["cat"]}})])
 
         moved = batch.to(torch.device("cpu"), floating_dtype)
         tensor_fields = [
@@ -582,6 +587,7 @@ class TestBatchDeviceTransfer:
 # Error Policies
 # ===========================================================================
 
+
 class TestErrorPolicies:
     def test_skip_policy_drops_bad_record(self, processor, monkeypatch):
         """error_policy='skip' should silently drop malformed records."""
@@ -607,11 +613,10 @@ class TestErrorPolicies:
     def test_raise_policy_propagates(self, processor, monkeypatch):
         """error_policy='raise' should propagate exceptions."""
         monkeypatch.setattr(
-            processor, "_transform_record",
+            processor,
+            "_transform_record",
             lambda *a, **kw: (_ for _ in ()).throw(ValueError("boom")),
         )
         processor.is_training = False
         with pytest.raises(ValueError, match="boom"):
-            processor.collate_fn_inference(
-                [("x.", {"entities": {"x": []}})], error_policy="raise"
-            )
+            processor.collate_fn_inference([("x.", {"entities": {"x": []}})], error_policy="raise")

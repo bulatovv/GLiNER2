@@ -7,6 +7,7 @@ module's job is to make that impossible: it self-asserts the emitted shape
 before returning, and either the schema round-trips through the real processor
 with exact label alignment or it fails loudly at compile.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -14,19 +15,18 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .constraints import (
-    AnyOtherSelected,
-    Constraint,
-    DictAssignment,
-    IsDefault,
-    Iff,
-    Not,
-)
+from .constraints import AnyOtherSelected, Constraint, DictAssignment, IsDefault, Iff, Not
 from .errors import SchemaError
 from .schema import ClassificationSchema, TaskSpec, _RESERVED
 
-_MODEL_KEYS = ("json_structures", "classifications", "entities", "relations",
-               "json_descriptions", "entity_descriptions")
+_MODEL_KEYS = (
+    "json_structures",
+    "classifications",
+    "entities",
+    "relations",
+    "json_descriptions",
+    "entity_descriptions",
+)
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,7 @@ def _classification_entry(spec: TaskSpec) -> dict:
     entry = {
         "task": spec.name,
         "labels": list(spec.label_names),
-        "true_label": ["N/A"],                    # MANDATORY: read unconditionally
+        "true_label": ["N/A"],  # MANDATORY: read unconditionally
         "multi_label": not spec.is_exclusive,
         "cls_threshold": spec.threshold,
         "class_act": spec.activation,
@@ -151,9 +151,7 @@ def _static_feasibility(schema: ClassificationSchema, task_specs) -> None:
     undetermined = DictAssignment(schema, selected={}, decided=())
     for c in constraints:
         if c.evaluate(undetermined) is False:
-            raise SchemaError(
-                "constraint set is unsatisfiable on the declared label sets"
-            )
+            raise SchemaError("constraint set is unsatisfiable on the declared label sets")
 
     for spec in task_specs:
         if not spec.is_exclusive:
@@ -179,9 +177,7 @@ def _lower_defaults(schema: ClassificationSchema, task_specs) -> tuple:
     constraints = list(schema.constraints)
     for spec in task_specs:
         if spec.default is not None:
-            constraints.append(
-                Iff(IsDefault(spec.name), Not(AnyOtherSelected(spec.name)))
-            )
+            constraints.append(Iff(IsDefault(spec.name), Not(AnyOtherSelected(spec.name))))
     return tuple(constraints)
 
 
