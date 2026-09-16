@@ -109,3 +109,29 @@ def test_fallback_record_survives_eval_loss_build_targets():
         out = model(batch)
     assert out.total_loss is not None
     assert torch.isfinite(out.total_loss)
+
+
+def test_fallback_record_contributes_zero_gold_targets():
+    # Pins the fix at the level it actually operates on (targets), not just
+    # "the forward pass didn't crash": a fabricated-but-validly-shaped
+    # mention (e.g. structure_labels=[[1, [[[(0, 0)]]]]], a plausible partial
+    # re-implementation) would also survive the loss-based assertions above
+    # without this check, since it happens to be loss-invisible today.
+    model = build_tiny_boundary_model()
+    model.eval()
+    batch = _eval_collator(model, build_targets=True)([ENTITIES_ONLY, MALFORMED_RELATIONS])
+    fallback_idx = 1
+    assert int(batch.targets.mention_mask[fallback_idx].sum()) == 0
+
+
+def test_fallback_record_has_correct_text_length():
+    # Pins the second, independent half of the fix: text_word_first_positions
+    # must actually be populated (previously silently defaulted to [], giving
+    # text_length=0 for every fallback record). Regressing this alone leaves
+    # the loss-based assertions above green, since a count=0 target never
+    # exercises text_length at all.
+    model = build_tiny_boundary_model()
+    model.eval()
+    batch = _eval_collator(model, build_targets=True)([ENTITIES_ONLY, MALFORMED_RELATIONS])
+    fallback_idx = 1
+    assert batch.text_word_counts[fallback_idx] == len(batch.text_tokens[fallback_idx]) == 1
