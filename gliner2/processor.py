@@ -719,7 +719,28 @@ class SchemaTransformer:
         )
 
     def _create_fallback_record(self, text: str, schema: Dict) -> TransformedRecord:
-        """Create minimal valid record for failed transformations."""
+        """Create minimal valid record for failed transformations.
+
+        This is a structural placeholder only: the real text/schema failed to
+        transform, so there is no valid annotation to supervise on. It must
+        therefore contribute zero gold targets under *any* value of
+        ``build_targets`` -- hence ``structure_labels=[[0, []]]`` (count=0),
+        which ``build_boundary_batch_metadata`` treats as "no target for this
+        task" unconditionally. Previously this used count=1 with a fabricated
+        ``(0, 0)`` mention span; that was silently inert under
+        ``build_targets=False`` (plain inference, the only path this used to
+        be exercised on), but crashes once eval-loss (``build_targets=True``)
+        tries to materialize it as a real target: ``positions`` ends up being
+        the bare tuple ``(0, 0)`` instead of a list of tuples, so
+        ``for start, end_inclusive in positions`` unpacks the ints 0/0 and
+        raises ``TypeError: cannot unpack non-iterable int object``.
+
+        Also populate ``text_word_first_positions`` (previously omitted,
+        defaulting to ``[]``) so ``text_word_counts``/``text_length`` for this
+        record is a correct 1, not 0 -- otherwise, even with a valid target
+        shape, ``validate_target_graph`` would reject any target against a
+        zero-length text.
+        """
         dummy_tokens = ["(", "[P]", "dummy", "(", "[E]", "entity", ")", ")"]
         format_result = self._format_input_with_mapping([dummy_tokens], ["."])
 
@@ -728,7 +749,8 @@ class SchemaTransformer:
             mapped_indices=format_result["mapped_indices"],
             schema_tokens_list=[dummy_tokens],
             text_tokens=["."],
-            structure_labels=[[1, [[(0, 0)]]]],
+            text_word_first_positions=format_result["text_word_first_positions"],
+            structure_labels=[[0, []]],
             task_types=["entities"],
             start_token_idx=[0],
             end_token_idx=[1],

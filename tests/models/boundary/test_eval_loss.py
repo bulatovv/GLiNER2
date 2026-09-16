@@ -67,3 +67,45 @@ def test_plain_inference_collation_builds_no_targets():
     model = build_tiny_boundary_model()
     batch = _eval_collator(model, build_targets=None)([ENTITIES_ONLY])
     assert batch.targets is None
+
+
+# A malformed record (any shape ExtractorProcessor._transform_record rejects;
+# here, relations in the flat/legacy shape `_process_relations` cannot parse)
+# only ever crashed under `error_policy="fallback"` (the eval collator's
+# default) *and* `build_targets=True` (the eval-loss decoupling above): the
+# transform failure is swallowed and substituted with
+# SchemaTransformer._create_fallback_record, whose `structure_labels` used to
+# encode a fabricated (0, 0) mention as a bare tuple instead of a list of
+# tuples, and omitted `text_word_first_positions` (leaving text_length at 0).
+# Plain inference (build_targets=False/None) never touched either field, so
+# this was silently inert until an eval loss started requesting real targets.
+MALFORMED_RELATIONS = (
+    "the kiox 300 pairs with the kiox 400c on this generation .",
+    {
+        "relations": [
+            {"name": "same_generation_family", "head": "kiox 300", "tail": "kiox 400c"}
+        ]
+    },
+)
+
+
+def test_fallback_record_survives_eval_loss_build_targets():
+    model = build_tiny_boundary_model()
+    model.eval()
+
+    # error_policy left at its "fallback" default (what the real Trainer eval
+    # dataloader uses) so the malformed record is substituted, not raised.
+    collator = ExtractorCollator(
+        model.processor,
+        is_training=False,
+        architecture="boundary",
+        max_gold_per_query=model.boundary_head.settings.max_gold_per_query,
+        build_targets=True,
+    )
+    batch = collator([ENTITIES_ONLY, MALFORMED_RELATIONS])
+    assert batch.targets is not None
+
+    with torch.no_grad():
+        out = model(batch)
+    assert out.total_loss is not None
+    assert torch.isfinite(out.total_loss)
