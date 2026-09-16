@@ -531,12 +531,22 @@ class SchemaTransformer:
             try:
                 transformed = self._transform_record(record, max_len=max_len)
                 transformed_records.append(transformed)
-            except Exception:
+            except Exception as exc:
                 if error_policy == "raise":
                     raise
                 if error_policy == "skip":
                     continue
-                # fallback: minimal dummy record (legacy compatibility)
+                # fallback: minimal dummy record (legacy compatibility). This
+                # record carries no real supervision, so a malformed eval set
+                # can silently deflate eval_loss toward the fallback's neutral
+                # contribution rather than raising -- warn so it's visible.
+                logger.warning(
+                    "record failed to transform (%s: %s); substituting a "
+                    "fallback record with no gold targets (error_policy=%r)",
+                    type(exc).__name__,
+                    exc,
+                    error_policy,
+                )
                 transformed_records.append(self._create_fallback_record(text, schema))
 
         return self._pad_batch(transformed_records)
@@ -721,25 +731,24 @@ class SchemaTransformer:
     def _create_fallback_record(self, text: str, schema: Dict) -> TransformedRecord:
         """Create minimal valid record for failed transformations.
 
-        This is a structural placeholder only: the real text/schema failed to
-        transform, so there is no valid annotation to supervise on. It must
-        therefore contribute zero gold targets under *any* value of
-        ``build_targets`` -- hence ``structure_labels=[[0, []]]`` (count=0),
-        which ``build_boundary_batch_metadata`` treats as "no target for this
-        task" unconditionally. Previously this used count=1 with a fabricated
-        ``(0, 0)`` mention span; that was silently inert under
-        ``build_targets=False`` (plain inference, the only path this used to
-        be exercised on), but crashes once eval-loss (``build_targets=True``)
-        tries to materialize it as a real target: ``positions`` ends up being
-        the bare tuple ``(0, 0)`` instead of a list of tuples, so
-        ``for start, end_inclusive in positions`` unpacks the ints 0/0 and
-        raises ``TypeError: cannot unpack non-iterable int object``.
+        Structural placeholder only -- the real text/schema failed to
+        transform, so it must contribute zero gold targets under *any*
+        ``build_targets`` value. ``structure_labels=[[0, []]]`` (count=0) is
+        the codebase's no-target sentinel (see ``_process_json_structures``);
+        every ``structure_labels`` consumer short-circuits on it before
+        touching ``instances``. See PR discussion for the history of the bug
+        this fixed (a previous `count=1` fabricated mention that crashed
+        under eval-loss).
 
-        Also populate ``text_word_first_positions`` (previously omitted,
-        defaulting to ``[]``) so ``text_word_counts``/``text_length`` for this
-        record is a correct 1, not 0 -- otherwise, even with a valid target
-        shape, ``validate_target_graph`` would reject any target against a
-        zero-length text.
+        OPEN ITEM (flagged for reviewer, not yet resolved): this record omits
+        ``schema_special_positions`` (unlike ``_transform_record``, which
+        always populates it), so the layout declares one extractive query for
+        the dummy schema below while the encoder builds zero query markers for
+        it. That mismatch is currently masked rather than validated, and is
+        the actual reason this record is loss-neutral today -- populating
+        ``schema_special_positions`` for consistency would make the fallback
+        contribute a small but nonzero eval loss. Needs an explicit decision:
+        wire it through, or document the query-marker omission as intentional.
         """
         dummy_tokens = ["(", "[P]", "dummy", "(", "[E]", "entity", ")", ")"]
         format_result = self._format_input_with_mapping([dummy_tokens], ["."])
