@@ -321,7 +321,15 @@ def marginal_pair_consistency_loss(
 ) -> torch.Tensor:
     """Match boundary marginals to candidate-level noisy-OR probabilities."""
     probabilities = torch.sigmoid(pair_logits) * valid_mask.to(pair_logits.dtype)
-    log_survival = torch.log1p(-probabilities.clamp(max=1.0 - 1e-6))
+    # The clamp epsilon must be representable in the tensor's own dtype. In half precision
+    # `1.0 - 1e-6` rounds to exactly 1.0 (bf16 eps is 7.8e-3, fp16 eps is 9.8e-4), so the
+    # clamp becomes a no-op, a saturated probability reaches 1.0, and log1p(-1.0) is -inf.
+    # The forward still looks healthy -- the -inf is summed and `1 - exp(-inf)` is 1 -- but
+    # d/dp log1p(-p) = -1/(1-p) is infinite, and a masked entry's zero grad_output turns
+    # that into 0 * inf = NaN.
+    # max() leaves float32 bit-identical, since 1e-6 already exceeds its 1.2e-7 eps.
+    eps = max(1e-6, torch.finfo(probabilities.dtype).eps)
+    log_survival = torch.log1p(-probabilities.clamp(max=1.0 - eps))
     b, q, n = start_logits.shape
 
     def accumulate(index: torch.LongTensor):
