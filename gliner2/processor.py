@@ -531,12 +531,22 @@ class SchemaTransformer:
             try:
                 transformed = self._transform_record(record, max_len=max_len)
                 transformed_records.append(transformed)
-            except Exception:
+            except Exception as exc:
                 if error_policy == "raise":
                     raise
                 if error_policy == "skip":
                     continue
-                # fallback: minimal dummy record (legacy compatibility)
+                # fallback: minimal dummy record (legacy compatibility). This
+                # record carries no real supervision, so a malformed eval set
+                # can silently deflate eval_loss toward the fallback's neutral
+                # contribution rather than raising -- warn so it's visible.
+                logger.warning(
+                    "record failed to transform (%s: %s); substituting a "
+                    "fallback record with no gold targets (error_policy=%r)",
+                    type(exc).__name__,
+                    exc,
+                    error_policy,
+                )
                 transformed_records.append(self._create_fallback_record(text, schema))
 
         return self._pad_batch(transformed_records)
@@ -719,7 +729,27 @@ class SchemaTransformer:
         )
 
     def _create_fallback_record(self, text: str, schema: Dict) -> TransformedRecord:
-        """Create minimal valid record for failed transformations."""
+        """Create minimal valid record for failed transformations.
+
+        Structural placeholder only -- the real text/schema failed to
+        transform, so it must contribute zero gold targets under *any*
+        ``build_targets`` value. ``structure_labels=[[0, []]]`` (count=0) is
+        the codebase's no-target sentinel (see ``_process_json_structures``);
+        every ``structure_labels`` consumer short-circuits on it before
+        touching ``instances``. See PR discussion for the history of the bug
+        this fixed (a previous `count=1` fabricated mention that crashed
+        under eval-loss).
+
+        OPEN ITEM (flagged for reviewer, not yet resolved): this record omits
+        ``schema_special_positions`` (unlike ``_transform_record``, which
+        always populates it), so the layout declares one extractive query for
+        the dummy schema below while the encoder builds zero query markers for
+        it. That mismatch is currently masked rather than validated, and is
+        the actual reason this record is loss-neutral today -- populating
+        ``schema_special_positions`` for consistency would make the fallback
+        contribute a small but nonzero eval loss. Needs an explicit decision:
+        wire it through, or document the query-marker omission as intentional.
+        """
         dummy_tokens = ["(", "[P]", "dummy", "(", "[E]", "entity", ")", ")"]
         format_result = self._format_input_with_mapping([dummy_tokens], ["."])
 
@@ -728,7 +758,8 @@ class SchemaTransformer:
             mapped_indices=format_result["mapped_indices"],
             schema_tokens_list=[dummy_tokens],
             text_tokens=["."],
-            structure_labels=[[1, [[(0, 0)]]]],
+            text_word_first_positions=format_result["text_word_first_positions"],
+            structure_labels=[[0, []]],
             task_types=["entities"],
             start_token_idx=[0],
             end_token_idx=[1],

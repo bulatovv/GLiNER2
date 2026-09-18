@@ -1,8 +1,9 @@
 """Compile a ClassificationSchema into the model-schema dict + constraint set.
 
 This is where silent failure lives. ``_collate_batch`` swallows every exception
-and substitutes ``_create_fallback_record`` (``processor.py:369-374``), so a
-malformed compiled schema produces *garbage predictions, not an error*. This
+and substitutes ``SchemaTransformer._create_fallback_record`` (see
+``processor.py``), so a malformed compiled schema produces *garbage
+predictions, not an error*. This
 module's job is to make that impossible: it self-asserts the emitted shape
 before returning, and either the schema round-trips through the real processor
 with exact label alignment or it fails loudly at compile.
