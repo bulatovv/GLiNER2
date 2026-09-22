@@ -1054,8 +1054,85 @@ class BoundaryExtractor(ExtractorRuntimeMixin, BoundaryExtractorModel):
             choices = field_metadata.get("choices")
             validators = field_metadata.get("validators", ())
             formatted: List[Tuple[str, float, int, int]] = []
+            prefix_choice_by_token: Optional[Dict[int, str]] = None
             for span_index, (ts_raw, te_raw) in enumerate(spans):
                 ts, te = ts_raw - offset, te_raw - offset
+                if choices and te_raw <= offset:
+                    # decode_group()/RecordHead already picked this record's
+                    # own instance-conditioned candidate for the field, but
+                    # for a `choices=` field that candidate is one of the
+                    # literal enum tokens embedded once in the schema prefix
+                    # (e.g. "positive" in "sentiment(positive|negative|
+                    # neutral)"), not a document mention. Those tokens live
+                    # before `offset`, so token_boundaries_to_character_offsets
+                    # (which only maps *document*-range tokens to characters)
+                    # can't resolve them -- falling through to the `ts < 0`
+                    # check below would silently drop every choice answer.
+                    # That forced every record to fall back to
+                    # _decode_choice_field()'s document/field-level scoring
+                    # (same query_id, no per-record signal), so every record
+                    # in the document received the exact same choice value
+                    # and confidence regardless of which one actually asked.
+                    # Resolve the surface from the schema prefix tokens
+                    # instead, so the record's own already-correct
+                    # per-instance score and choice survive into `formatted`.
+                    if prefix_choice_by_token is None:
+                        prefix_tokens = batch.text_tokens[sample_index][:offset]
+                        prefix_choice_by_token = {}
+                        for choice in choices:
+                            idx = self._find_choice_idx(choice, prefix_tokens)
+                            if idx >= 0:
+                                prefix_choice_by_token[idx] = choice
+                    surface = prefix_choice_by_token.get(ts_raw, "")
+                    if not surface:
+                        continue
+                    candidate_probability = self._candidate_span_probability(
+                        candidates,
+                        sample_index,
+                        fspec.query_id,
+                        ts_raw,
+                        te_raw,
+                    )
+                    assignment_probability = (
+                        assignment_scores[span_index]
+                        if assignment_scores is not None
+                        and span_index < len(assignment_scores)
+                        else None
+                    )
+                    probability = (
+                        min(candidate_probability, float(assignment_probability))
+                        if assignment_probability is not None
+                        else candidate_probability
+                    )
+                    configured_threshold = field_metadata.get("threshold")
+                    if (
+                        configured_threshold is None
+                        or probability >= float(configured_threshold)
+                    ) and (
+                        not validators
+                        or all(
+                            validator.validate(surface)
+                            for validator in validators
+                        )
+                    ):
+                        anchor_span = (
+                            record_anchors[record_index]
+                            if record_anchors is not None
+                            and record_index is not None
+                            and record_index < len(record_anchors)
+                            else None
+                        )
+                        if anchor_span is not None:
+                            cs, ce = token_boundaries_to_character_offsets(
+                                anchor_span[0] - offset,
+                                anchor_span[1] - offset,
+                                start_map,
+                                end_map,
+                            )
+                        else:
+                            cs, ce = 0, 0
+                        formatted.append((surface, probability, cs, ce))
+                    continue
                 if ts < 0 or te > text_len or te <= ts:
                     continue
                 cs, ce = token_boundaries_to_character_offsets(ts, te, start_map, end_map)
