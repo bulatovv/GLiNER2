@@ -194,6 +194,103 @@ def test_engine_decode_records_emits_public_structure_shape():
     assert buyers == {"Alice", "Bob"}
 
 
+def test_engine_choice_field_uses_per_record_assignment_not_global_fallback(
+    monkeypatch,
+):
+    """A ``choices=`` field inside a repeated record must not collapse every
+    instance to the same document-level answer.
+
+    ``decode_group()`` already assigns each record instance its own field
+    candidate (see the hand-crafted ``assign_logits`` below: instance 0 is
+    forced onto the "positive" enum token, instance 1 onto "negative"). But
+    those enum tokens live in the schema prefix (positions before ``offset``),
+    which ``_format_field``'s document-range bounds check used to drop
+    unconditionally -- so every record's ``formatted`` list came back empty
+    and every record fell through to ``_decode_choice_field()``'s
+    document/field-level fallback instead, which scores the enum choices once
+    per field (not once per record) and is therefore identical for every
+    instance. We pin that fallback to a fixed, obviously-wrong answer
+    ("negative" for everyone) via ``score_explicit_spans`` below: if the two
+    records still come back identical, the per-record signal was discarded.
+    """
+    from types import SimpleNamespace
+
+    model = _build_tiny_records_model()
+    hidden = model.hidden_size
+
+    # Schema prefix (positions 0-1): the literal enum tokens for `sentiment`.
+    # Document (positions 2-8, offset=2): "Alice bought apples then Bob left now".
+    tokens = ["Alice", "bought", "apples", "then", "Bob", "left", "now"]
+    text = " ".join(tokens)
+    start_map, end_map, pos = [], [], 0
+    for tok in tokens:
+        start_map.append(pos)
+        end_map.append(pos + len(tok))
+        pos += len(tok) + 1
+    offset = 2
+
+    # field 0 (anchor, "name"): "Alice" abs (2,3), "Bob" abs (6,7).
+    # field 1 ("sentiment", choices): "positive" abs (0,1), "negative" abs (1,2).
+    cands = make_candidates(
+        [[(offset + 0, offset + 1), (offset + 4, offset + 5)], [(0, 1), (1, 2)]],
+        hidden,
+        high_logit_field=0,
+    )
+    spec = RecordSpec(
+        task_index=0, task_name="dish", task_type="json_structures", mode="natural",
+        fields=(
+            RecordFieldSpec(0, "name", 0, FieldCardinality.REQUIRED_ONE, is_anchor=True),
+            RecordFieldSpec(1, "sentiment", 1, FieldCardinality.REQUIRED_ONE),
+        ),
+        anchor_query_id=0,
+    )
+    batch = SimpleNamespace(
+        record_specs=({0: spec},),
+        text_tokens=[["positive", "negative"] + tokens],
+    )
+    total_tokens = offset + len(tokens)
+    core = {
+        "query_states": torch.randn(1, 2, hidden),
+        "query_mask": torch.ones(1, 2, dtype=torch.bool),
+        "text_states": torch.randn(1, total_tokens, hidden),
+        "text_mask": torch.ones(1, total_tokens, dtype=torch.bool),
+    }
+
+    # Force instance 0 (Alice) onto "positive" and instance 1 (Bob) onto
+    # "negative" in decode_group's own per-instance assignment.
+    original_forward_group = model.record_decoder.forward_group
+
+    def patched_forward_group(spec_, query_states_i, candidates_, sample_index_):
+        group = original_forward_group(spec_, query_states_i, candidates_, sample_index_)
+        with torch.no_grad():
+            group.assign_logits[1] = torch.tensor([
+                [-10.0, 10.0, -10.0],   # instance 0 -> candidate 0 ("positive")
+                [-10.0, -10.0, 10.0],   # instance 1 -> candidate 1 ("negative")
+            ])
+        return group
+
+    monkeypatch.setattr(model.record_decoder, "forward_group", patched_forward_group)
+
+    # The document/field-level fallback _decode_choice_field() falls back to
+    # if per-record data is discarded: pin it to a fixed wrong answer so a
+    # regression (both records reading "negative") is unambiguous.
+    monkeypatch.setattr(
+        model.boundary_head,
+        "score_explicit_spans",
+        lambda *args, **kwargs: torch.tensor([[[-5.0, 5.0]]]),
+    )
+
+    out = model._decode_records(
+        batch, 0, core, cands, offset=offset, start_map=start_map, end_map=end_map,
+        text=text, text_len=len(tokens), include_confidence=True, include_spans=False,
+        metadata={"field_metadata": {"dish.sentiment": {"choices": ["positive", "negative"]}}},
+    )
+
+    assert "dish" in out
+    by_name = {inst["name"]["text"]: inst["sentiment"]["text"] for inst in out["dish"]}
+    assert by_name == {"Alice": "positive", "Bob": "negative"}
+
+
 def test_engine_does_not_fall_back_to_legacy_for_empty_record_decode(
     monkeypatch,
 ):

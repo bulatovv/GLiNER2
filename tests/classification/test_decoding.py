@@ -11,6 +11,7 @@ import pytest
 from gliner2.classification import constraints as C
 from gliner2.classification.compiler import compile_schema
 from gliner2.classification.decoding import (
+    BeamDecoder,
     ExactDecoder,
     IndependentDecoder,
     MinViolationsDecoder,
@@ -197,6 +198,53 @@ def test_beam_fallback_matches_exact_on_small_problem():
     assert beam_sol.feasible
     assert beam_sol.assignments["intent"].labels == exact_sol.assignments["intent"].labels
     assert beam_sol.assignments["effects"].labels == exact_sol.assignments["effects"].labels
+
+
+# ---- B2 : a beam dead end is "no feasible assignment", never feasible ---
+
+def _beam_dead_end():
+    # a=x requires b=p and b=q at once, so a=x has no feasible completion while
+    # a=y does. beam_size=1 keeps only the higher-utility a=x.
+    schema = (ClassificationSchema()
+              .single("a", ["x", "y"])
+              .single("b", ["p", "q"])
+              .constrain(C.implies(("a", "x"), ("b", "p")),
+                         C.implies(("a", "x"), ("b", "q"))))
+    compiled = compile_schema(schema)
+    tasks = {"a": {"x": 3.0, "y": 0.0}, "b": {"p": 2.0, "q": 1.0}}
+    return compiled, tasks
+
+
+def test_beam_dead_end_returns_none():
+    compiled, tasks = _beam_dead_end()
+    cfg = _cfg(decoder="exact")
+    assert BeamDecoder().decode(_problem(compiled, tasks, cfg), beam_size=1) is None
+
+
+def test_budget_exhausted_beam_dead_end_raises_infeasible_error():
+    compiled, tasks = _beam_dead_end()
+    cfg = _cfg(decoder="exact", exact_node_budget=1, beam_size=1, on_infeasible="raise")
+    with pytest.raises(InfeasibleError):
+        decode(_problem(compiled, tasks, cfg), cfg)
+
+
+@pytest.mark.parametrize("mode", ["relax", "min_violations"])
+def test_budget_exhausted_beam_dead_end_walks_the_infeasibility_ladder(mode):
+    compiled, tasks = _beam_dead_end()
+    cfg = _cfg(decoder="exact", exact_node_budget=1, beam_size=1, on_infeasible=mode)
+    problem = _problem(compiled, tasks, cfg)
+    sol = decode(problem, cfg, widen=lambda: problem)
+    assert set(sol.assignments) == {"a", "b"}   # complete assignment, never {}
+    assert sol.exact is False                   # the search was cut short
+
+
+# ---- B3 : min_violations is exact only when the search completed -------
+
+def test_min_violations_is_not_exact_when_budget_is_exhausted():
+    compiled, tasks = _hard_infeasible()
+    problem = _problem(compiled, tasks, _cfg(on_infeasible="min_violations"))
+    assert MinViolationsDecoder().decode(problem).exact is True
+    assert MinViolationsDecoder().decode(problem, budget=1).exact is False
 
 
 # ---- T-D7 : active masking drops constraints ---------------------------
