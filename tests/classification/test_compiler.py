@@ -109,7 +109,19 @@ def test_missing_true_label_raises_when_targets_are_requested(processor):
 
 def test_training_gold_comes_from_the_dataset(processor):
     """Training examples carry true_label themselves, not from the compiler."""
+    from gliner2.processor import SamplingConfig, SchemaTransformer
     from gliner2.training.data import Classification, InputExample
+
+    no_sampling = SamplingConfig(
+        remove_classification_prob=0.0,
+        shuffle_classification_labels=False,
+        remove_classification_label_prob=0.0,
+        synthetic_label_prob=0.0,
+        include_true_label_prob=1.0,
+    )
+    trainer_processor = SchemaTransformer(
+        tokenizer=processor.tokenizer, sampling_config=no_sampling
+    )
 
     record = InputExample(
         text="hello",
@@ -118,8 +130,11 @@ def test_training_gold_comes_from_the_dataset(processor):
     schema = record["output"]
     assert schema["classifications"][0]["true_label"] == ["b"]
 
-    batch = processor.collate_fn_train([(record["input"], schema)], error_policy="raise")
-    assert batch.structure_labels[0] == [[0, 1]]
+    for _ in range(20):
+        batch = trainer_processor.collate_fn_train(
+            [(record["input"], schema)], error_policy="raise"
+        )
+        assert batch.structure_labels[0] == [[0, 1]]
 
 
 def test_compiled_schema_collates_with_targets_once_gold_is_attached(processor):

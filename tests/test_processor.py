@@ -453,9 +453,17 @@ class TestSchemaTransformerE2E:
         processor_no_sampling.is_training = False
         record = processor_no_sampling.transform_and_format(text, schema)
         assert record.task_types[0] == "classifications"
-        assert record.structure_labels[0] == [0, 0]
+        assert record.structure_labels[0] == [1, 0]
         gold = processor_no_sampling.transform_and_format(text, schema, build_targets=True)
         assert gold.structure_labels[0] == [1, 0]
+        plain = processor_no_sampling.transform_and_format(text, schema, build_targets=False)
+        assert plain.structure_labels[0] == [0, 0]
+
+    def test_transform_classification_without_gold(self, processor_no_sampling):
+        schema = {"classifications": [{"task": "sentiment", "labels": ["positive", "negative"]}]}
+        processor_no_sampling.is_training = False
+        record = processor_no_sampling.transform_and_format("This is great.", schema)
+        assert record.structure_labels[0] == [0, 0]
 
     def test_collate_padding(self, processor):
         """Shorter sequences should be zero-padded to the longest."""
@@ -643,12 +651,21 @@ class TestTransformRecord:
         record = processor.transform_record(text, schema, max_len=3)
         assert len(record.text_tokens) == 3
 
-    def test_transform_and_format_delegates(self, processor):
-        text = "hello world."
-        schema = {"entities": {"x": []}}
-        a = processor.transform_and_format(text, schema)
-        b = processor.transform_record(text, schema)
-        assert a.input_ids == b.input_ids
+    @pytest.mark.parametrize("text", ["John Smith lives in New York City", "", "hello world!"])
+    def test_transform_record_matches_collate_fn_inference(self, processor, text):
+        schema = {
+            "entities": {"person": [], "location": []},
+            "classifications": [{"task": "sentiment", "labels": ["positive", "negative"]}],
+        }
+        processor.is_training = True
+        record = processor.transform_record(text, schema)
+        assert processor.is_training is False
+        batch = processor.collate_fn_inference([(text, schema)], error_policy="raise")
+        assert record.input_ids == batch.input_ids[0, : batch.original_lengths[0]].tolist()
+        assert record.text == batch.original_texts[0]
+        assert record.text_tokens == batch.text_tokens[0]
+        assert record.schema_tokens_list == batch.schema_tokens_list[0]
+        assert record.structure_labels == batch.structure_labels[0]
 
 
 class TestTokenizationCache:

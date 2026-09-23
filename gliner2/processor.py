@@ -481,10 +481,10 @@ class SchemaTransformer:
     def transform_record(
         self, text: str, schema: Any, max_len: Optional[int] = None, *, build_targets: bool = False
     ) -> TransformedRecord:
-        """Public single-record transform.
+        """Public single-record transform in inference mode.
 
-        Returns the same ``TransformedRecord`` as the collate path, so a
-        server can preprocess one request without calling a private method.
+        Produces the same record ``collate_fn_inference`` would for this row:
+        inference mode, schema resolution and punctuation normalization.
 
         Args:
             text: Input text.
@@ -495,15 +495,15 @@ class SchemaTransformer:
         Returns:
             TransformedRecord ready for batching or serving.
         """
-        if hasattr(schema, "build"):
-            schema = schema.build()
-        elif hasattr(schema, "schema"):
-            schema = schema.schema
-        record = {"text": text, "schema": copy.deepcopy(schema)}
+        self.is_training = False
+        record = {
+            "text": self._normalize_text(text),
+            "schema": copy.deepcopy(self._resolve_schema(schema)),
+        }
         return self._transform_record(record, max_len=max_len, build_targets=build_targets)
 
     def transform_and_format(
-        self, text: str, schema: Dict[str, Any], *, build_targets: bool = False
+        self, text: str, schema: Dict[str, Any], *, build_targets: Optional[bool] = None
     ) -> TransformedRecord:
         """
         Transform and format a single record.
@@ -514,12 +514,33 @@ class SchemaTransformer:
         Args:
             text: Input text
             schema: Schema dictionary
-            build_targets: When True, classification gold must include ``true_label``.
+            build_targets: ``None`` builds classification gold wherever
+                ``true_label`` is present; ``True`` requires it; ``False``
+                emits zero targets.
 
         Returns:
             TransformedRecord ready for batching
         """
-        return self.transform_record(text, schema, build_targets=build_targets)
+        record = {"text": text, "schema": copy.deepcopy(schema)}
+        return self._transform_record(record, build_targets=build_targets)
+
+    @staticmethod
+    def _resolve_schema(schema: Any) -> Any:
+        """Unwrap a ``Schema`` builder or wrapper into its schema dict."""
+        if hasattr(schema, "build"):
+            return schema.build()
+        if hasattr(schema, "schema"):
+            return schema.schema
+        return schema
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Ensure text ends with sentence punctuation, as collation expects."""
+        if not text:
+            return "."
+        if not text.endswith((".", "!", "?")):
+            return text + "."
+        return text
 
     # =========================================================================
     # Internal: Batch Processing
@@ -547,18 +568,8 @@ class SchemaTransformer:
         transformed_records = []
 
         for text, schema in batch:
-            # Handle Schema objects
-            if hasattr(schema, "build"):
-                schema = schema.build()
-            elif hasattr(schema, "schema"):
-                schema = schema.schema
-
-            # Ensure text ends with punctuation
-            if text and not text.endswith((".", "!", "?")):
-                text = text + "."
-            elif not text:
-                text = "."
-
+            schema = self._resolve_schema(schema)
+            text = self._normalize_text(text)
             record = {"text": text, "schema": copy.deepcopy(schema)}
 
             try:
@@ -587,7 +598,11 @@ class SchemaTransformer:
         return self._pad_batch(transformed_records)
 
     def _transform_record(
-        self, record: Dict[str, Any], max_len: Optional[int] = None, *, build_targets: bool = False
+        self,
+        record: Dict[str, Any],
+        max_len: Optional[int] = None,
+        *,
+        build_targets: Optional[bool] = False,
     ) -> TransformedRecord:
         """Transform a single record (internal).
 
@@ -1230,9 +1245,13 @@ class SchemaTransformer:
         text_tokens: List[str],
         len_prefix: int,
         *,
-        build_targets: bool = False,
+        build_targets: Optional[bool] = False,
     ) -> List[Dict]:
-        """Build output labels for each schema."""
+        """Build output labels for each schema.
+
+        ``build_targets=None`` builds classification gold only where
+        ``true_label`` is present.
+        """
         results = []
 
         for schema_tokens, task_type, struct_label in zip(
@@ -1296,10 +1315,11 @@ class SchemaTransformer:
                     raise ValueError(f"Missing classification for: {schema_tokens[2]}")
 
                 label_names = cls_item["labels"]
-                if not build_targets:
+                has_gold = "true_label" in cls_item
+                if build_targets is False or (build_targets is None and not has_gold):
                     bool_labels = [0] * len(label_names)
                 else:
-                    if "true_label" not in cls_item:
+                    if not has_gold:
                         raise SchemaError(
                             f"classification task {cls_item.get('task')!r} is missing true_label"
                         )
