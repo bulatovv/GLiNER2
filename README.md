@@ -16,7 +16,7 @@ GLiNER2 is a **schema-conditioned** encoder family for **Named Entity Recognitio
 
 Load any Hub checkpoint with `AutoExtractor.from_pretrained(...)`. It dispatches by the saved `architecture` field. `GLiNER2.from_pretrained(...)` remains span-only and will **not** load GLiNER2.5 boundary checkpoints.
 
-Fine-tune via [Fastino](https://fastino.ai). Join discussions on [Discord](https://discord.gg/fastino) and [Reddit](https://www.reddit.com/r/GLiNER/).
+Fine-tune via [Fastino](https://agent.fastino.ai). Join discussions on [Discord](https://discord.gg/fastino) and [Reddit](https://www.reddit.com/r/GLiNER/).
 
 ## ✨ Why GLiNER2?
 
@@ -1125,7 +1125,7 @@ results = model.batch_extract_entities(
 
 Train GLiNER2 on your own data to specialize for your domain or use case.
 
-> **Hosted option:** if you'd rather not manage GPUs, the [Fastino API](https://fastino.ai) can also fine-tune and serve GLiNER models, which is usually faster than training locally. See [Hosted Training](tutorial/9-training.md#hosted-training-fastino-api) for the endpoints. Everything below works fully offline without it.
+> **Hosted option:** if you'd rather not manage GPUs, the [Fastino API](https://agent.fastino.ai) can also fine-tune and serve GLiNER models, which is usually faster than training locally. See [Hosted Training](tutorial/9-training.md#hosted-training-fastino-api) for the endpoints. Everything below works fully offline without it.
 
 ### Quick Start Training
 
