@@ -60,7 +60,7 @@ The torch-free API client partitions batch requests locally and can scan long
 documents without changing the server protocol:
 
 ```python
-client = API()  # reads PIONEER_API_KEY
+client = API()  # reads FASTINO_API_KEY
 results = client.batch_extract_entities(
     documents,
     ["company", "person"],
