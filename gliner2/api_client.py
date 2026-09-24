@@ -307,8 +307,7 @@ class GLiNER2API:
         
         Args:
             api_key: API authentication key. If not provided, reads from
-                     FASTINO_API_KEY environment variable (falls back to
-                     the legacy PIONEER_API_KEY).
+                     FASTINO_API_KEY environment variable.
             api_base_url: Override the default API base URL.
             timeout: Request timeout in seconds.
             max_retries: Maximum number of retries for failed requests.
@@ -318,7 +317,7 @@ class GLiNER2API:
         """
         # Read API key from environment if not provided
         if api_key is None:
-            api_key = os.environ.get("FASTINO_API_KEY") or os.environ.get("PIONEER_API_KEY")
+            api_key = os.environ.get("FASTINO_API_KEY")
             if api_key is None:
                 raise ValueError(
                     "API key must be provided either as an argument or via "
