@@ -190,10 +190,20 @@ class BaseExtractorModel(PreTrainedModel):
             kwargs = {"trust_remote_code": True}
             if implementation:
                 kwargs["attn_implementation"] = implementation
-            if encoder_config is not None:
-                encoder = AutoModel.from_config(config, **kwargs)
-            else:
-                encoder = AutoModel.from_pretrained(model_name, **kwargs)
+            with warnings.catch_warnings():
+                # Transformers' DeBERTa module decorates helpers with
+                # ``torch.jit.script`` at import time, which PyTorch flags as
+                # unsupported on Python 3.14+. The helpers still run eagerly,
+                # so the warning is not actionable for GLiNER2 users.
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"`torch\.jit\.script` is not supported",
+                    category=FutureWarning,
+                )
+                if encoder_config is not None:
+                    encoder = AutoModel.from_config(config, **kwargs)
+                else:
+                    encoder = AutoModel.from_pretrained(model_name, **kwargs)
             # Transformers 5 honors a serialized encoder dtype during
             # ``from_config``. GLiNER2 task heads are initialized in FP32, so a
             # half-precision encoder would emit activations that cannot enter
@@ -207,12 +217,17 @@ class BaseExtractorModel(PreTrainedModel):
         except (TypeError, ValueError, ImportError) as error:
             if not attn_implementation or attn_implementation == "eager":
                 raise
-            warnings.warn(
+            message = (
                 f"Encoder rejected attn_implementation={attn_implementation!r}; "
-                f"falling back to 'eager' ({error})",
-                RuntimeWarning,
-                stacklevel=2,
+                f"falling back to 'eager' ({error})"
             )
+            # SDPA is the default speed preference and many encoders (e.g.
+            # DeBERTa-v2/v3) lack it; eager attention is numerically equivalent,
+            # so only an explicit flash_attention_2 request warrants a warning.
+            if attn_implementation == "sdpa":
+                logger.debug(message)
+            else:
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
             return load("eager")
 
     def task_module_names(self) -> Tuple[str, ...]:

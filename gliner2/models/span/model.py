@@ -154,13 +154,12 @@ class SpanExtractorModel(BaseExtractorModel):
         self._print_config(config)
 
     def _print_config(self, config):
-        print("=" * 60)
-        print("🧠 Model Configuration")
-        print("=" * 60)
-        print(f"Encoder model      : {config.model_name}")
-        print(f"Counting layer     : {config.counting_layer}")
-        print(f"Token pooling      : {config.token_pooling}")
-        print("=" * 60)
+        logger.info(
+            "Model configuration: encoder=%s counting_layer=%s token_pooling=%s",
+            config.model_name,
+            config.counting_layer,
+            config.token_pooling,
+        )
 
     # =========================================================================
     # Main Forward Pass
