@@ -49,9 +49,10 @@ Load from JSONL:
 
 from __future__ import annotations
 
+import copy
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import (
     Any, Dict, List, Mapping, Optional, Union, Tuple, Iterator, TYPE_CHECKING
@@ -59,6 +60,8 @@ from typing import (
 from collections import Counter
 from tqdm import tqdm
 
+from gliner2.inference.schema import AttributeGroup
+from gliner2.processing.attributes import expand_entity_attributes
 from gliner2.processing.targets import SurfaceSpan
 
 if TYPE_CHECKING:
@@ -73,6 +76,10 @@ def _is_locatable(value: Any, text: str) -> bool:
     if value is None or value == "":
         return True
     if isinstance(value, Mapping):
+        # attributes don't change where the mention is
+        value = {k: v for k, v in value.items() if k != "attributes"}
+        if value.keys() == {"text"}:
+            return _is_locatable(value["text"], text)
         try:
             span = SurfaceSpan.from_mapping(value)
         except ValueError:
@@ -719,6 +726,10 @@ class InputExample:
         Structured data extractions for this example.
     relations : List[Relation], optional
         Relation extractions for this example.
+    entity_attributes : Dict[str, AttributeGroup], optional
+        Attribute groups the entity mentions are labeled with. A mention carries
+        its values as ``{"text": ..., "attributes": {group: value}}``, with
+        ``start`` and ``end`` offsets to pin one occurrence.
 
     Examples
     --------
@@ -737,6 +748,7 @@ class InputExample:
     classifications: Optional[List[Classification]] = None
     structures: Optional[List[Structure]] = None
     relations: Optional[List[Relation]] = None
+    entity_attributes: Optional[Dict[str, AttributeGroup]] = None
 
     def __post_init__(self):
         if self.entities is None:
@@ -776,6 +788,10 @@ class InputExample:
                 for mention in mentions:
                     if not _is_locatable(mention, self.text):
                         errors.append(f"Entity '{mention}' (type: {entity_type}) not found in text")
+            try:
+                expand_entity_attributes(copy.deepcopy(self.to_dict()["output"]))
+            except (TypeError, ValueError) as e:
+                errors.append(str(e))
 
         for cls in self.classifications:
             errors.extend(cls.validate())
@@ -1004,6 +1020,10 @@ class InputExample:
                 output["record_metadata"] = record_metadata
         if self.relations:
             output["relations"] = [rel.to_dict() for rel in self.relations]
+        if self.entity_attributes:
+            output["entity_attributes"] = {
+                name: asdict(group) for name, group in self.entity_attributes.items()
+            }
         return {"input": self.text, "output": output}
 
     def to_json(self) -> str:
@@ -1017,6 +1037,10 @@ class InputExample:
 
         entities = output.get("entities")
         entity_descriptions = output.get("entity_descriptions")
+        entity_attributes = {
+            name: AttributeGroup(**group)
+            for name, group in output.get("entity_attributes", {}).items()
+        }
 
         classifications = []
         for cls_data in output.get("classifications", []):
@@ -1065,7 +1089,8 @@ class InputExample:
             entity_descriptions=entity_descriptions,
             classifications=classifications if classifications else None,
             structures=structures if structures else None,
-            relations=relations if relations else None
+            relations=relations if relations else None,
+            entity_attributes=entity_attributes or None,
         )
 
     @classmethod

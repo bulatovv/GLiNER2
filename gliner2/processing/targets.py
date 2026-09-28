@@ -226,6 +226,9 @@ class SurfaceSpan:
         missing = {"text", "start", "end"} - value.keys()
         if missing:
             raise ValueError(f"gold span is missing {sorted(missing)}")
+        unknown = value.keys() - {"text", "start", "end"}
+        if unknown:
+            raise ValueError(f"gold span has unknown keys {sorted(unknown)}")
         return cls(value["text"], value["start"], value["end"])
 
 

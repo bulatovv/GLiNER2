@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gliner2.inference.schema import AttributeGroup
 from gliner2.training.data import InputExample, Structure
 
 
@@ -36,3 +37,21 @@ def test_validate_rejects_a_span_whose_offsets_miss_its_text():
     assert any("dropping entity type" in warning for warning in warnings)
     assert not is_valid
     assert example.entities == {}
+
+
+def test_entity_attributes_round_trip_and_validate():
+    group = AttributeGroup(["landmark", "residential"], applies_to=["street"])
+    example = InputExample(
+        text=TEXT,
+        entities={"street": [
+            {"text": "Pushkin", "start": 0, "end": 7, "attributes": {"kind": "residential"}},
+        ]},
+        entity_attributes={"kind": group},
+    )
+
+    assert example.validate() == []
+    assert InputExample.from_dict(example.to_dict()) == example
+    assert example.sanitize() == ([], True)
+
+    example.entities["street"][0]["attributes"] = {"kind": "park"}
+    assert any("outside group 'kind'" in error for error in example.validate())

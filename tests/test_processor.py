@@ -18,6 +18,7 @@ import re
 import pytest
 import torch
 
+from gliner2.inference.schema import AttributeGroup, Schema
 from gliner2.processor import (
     CharLevelSplitter,
     PreprocessedBatch,
@@ -624,6 +625,62 @@ class TestGoldSpans:
         }
         with pytest.raises(ValueError, match="cannot be pinned to a span"):
             processor_no_sampling.transform_record(SPAN_TEXT, schema)
+
+
+ATTR_TEXT = "Alice praised Bob, then Alice blamed Carol."
+SENTIMENT = AttributeGroup(["positive", "negative", "neutral"], qualify_labels=True)
+
+
+class TestEntityAttributes:
+    @staticmethod
+    def _record(processor, persons, groups=None):
+        schema = {
+            "entities": {"person": persons},
+            "entity_attributes": groups or {"sentiment": SENTIMENT},
+        }
+        return processor.transform_record(ATTR_TEXT, schema)
+
+    def test_values_become_gold_for_the_inference_queries(self, processor_no_sampling):
+        p = processor_no_sampling
+        record = self._record(p, [
+            {"text": "Alice", "start": 0, "end": 5, "attributes": {"sentiment": "positive"}},
+            {"text": "Bob", "attributes": {"sentiment": "negative"}},
+            {"text": "Alice", "start": 24, "end": 29, "attributes": {"sentiment": "negative"}},
+            {"text": "Carol", "attributes": {"sentiment": "neutral"}},
+        ])
+        inference = Schema().entities(["person"]).entity_attributes({"sentiment": SENTIMENT})
+        assert record.schema_tokens_list == p.transform_record(
+            ATTR_TEXT, inference
+        ).schema_tokens_list
+        # person, then sentiment: negative / neutral / positive
+        assert record.structure_labels == [[1, [[
+            [(0, 0), (2, 2), (5, 5), (7, 7)],
+            [(2, 2), (5, 5)],
+            [(7, 7)],
+            [(0, 0)],
+        ]]]]
+
+    def test_surface_without_offsets_needs_one_value(self, processor_no_sampling):
+        with pytest.raises(ValueError, match="give each mention start and end offsets"):
+            self._record(processor_no_sampling, [
+                {"text": "Alice", "attributes": {"sentiment": "positive"}},
+                {"text": "Alice", "attributes": {"sentiment": "negative"}},
+                {"text": "Bob", "attributes": {"sentiment": "neutral"}},
+                {"text": "Carol", "attributes": {"sentiment": "neutral"}},
+            ])
+
+    def test_single_label_group_needs_a_value_per_mention(self, processor_no_sampling):
+        with pytest.raises(ValueError, match="has no value for single-label group"):
+            self._record(processor_no_sampling, [
+                {"text": "Bob", "attributes": {"sentiment": "negative"}},
+                "Carol",
+            ])
+        tags = {"tags": AttributeGroup(["vip", "staff"], multi_label=True)}
+        record = self._record(processor_no_sampling, [
+            {"text": "Bob", "attributes": {"tags": ["vip", "staff"]}},
+            "Carol",
+        ], groups=tags)
+        assert record.structure_labels == [[1, [[[(2, 2), (7, 7)], [(2, 2)], [(2, 2)]]]]]
 
 
 # ===========================================================================
