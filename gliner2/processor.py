@@ -16,6 +16,7 @@ import torch
 from transformers import AutoTokenizer
 
 from gliner2.classification.errors import SchemaError
+from gliner2.processing.attributes import expand_entity_attributes
 from gliner2.processing.targets import SurfaceSpan, char_span_to_word_boundaries
 from gliner2.processing.word_splitter import (  # noqa: F401 - public re-exports
     CharLevelSplitter,
@@ -688,6 +689,7 @@ class SchemaTransformer:
         # OPT-4: Caller (_collate_batch) already deepcopies the schema.
         # Only deepcopy here for direct callers (transform_and_format).
         text, schema = record["text"], record["schema"]
+        expand_entity_attributes(schema)
 
         # Build classification prefix
         prefix = self._build_classification_prefix(schema)

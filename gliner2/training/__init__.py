@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib
 
 from gliner2.training.data import (
+    AttributeLabels,
     ChoiceField,
     Classification,
     DataFormat,
@@ -36,6 +37,7 @@ _LAZY = {
 }
 
 __all__ = [
+    "AttributeLabels",
     "ChoiceField",
     "Classification",
     "DataFormat",
