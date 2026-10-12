@@ -14,6 +14,7 @@ This is different from document-level classification (`classify_text`). A review
 - [Qualifying Labels](#qualifying-labels)
 - [Combining with Other Schema Tasks](#combining-with-other-schema-tasks)
 - [Reading the Output](#reading-the-output)
+- [Training Attributes](#training-attributes)
 - [Best Practices](#best-practices)
 
 ## Setup
@@ -278,6 +279,31 @@ Multi-label attribute value:
 ```
 
 Attributes are only attached to **retained** entities. If a mention is dropped by threshold or overlap policy, it is not attributed.
+
+## Training Attributes
+
+`AttributeLabels` declares training queries; each mention carries its gold values.
+
+```python
+from gliner2.training import AttributeLabels, InputExample
+
+example = InputExample(
+    text="Alice smiled. Bob frowned.",
+    entities={"person": [
+        {"text": "Alice", "attributes": {"sentiment": "positive"}},
+        {"text": "Bob", "attributes": {"sentiment": "negative"}},
+    ]},
+    entity_attributes={
+        "sentiment": AttributeLabels(["positive", "negative"], qualify_labels=True),
+    },
+)
+trainer.train(train_data=[example])
+```
+
+Use the same labels and `qualify_labels` in the inference `AttributeGroup`.
+A gold value may be a label or a list. Output selection (`multi_label`, `threshold`,
+`applies_to`) stays in inference. See [the JSONL format](8-train_data.md#entity-attributes)
+for offsets, empty labels and validation.
 
 ## Best Practices
 

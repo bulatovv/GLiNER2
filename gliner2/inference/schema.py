@@ -13,7 +13,7 @@ import json
 import re
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Pattern, Union
+from typing import Any, Collection, Dict, List, Literal, Optional, Pattern, Union
 
 from pydantic import BaseModel
 
@@ -99,6 +99,67 @@ class AttributeGroup:
     threshold: float = 0.5
     applies_to: Optional[List[str]] = None
     qualify_labels: bool = False
+
+
+def attribute_prompt_labels(
+    groups: Dict[str, AttributeGroup], entity_labels: Collection[str]
+) -> Dict[str, str]:
+    """Validate attribute groups and map each label to its model-facing query text.
+
+    Args:
+        groups: Attribute groups keyed by group name.
+        entity_labels: Entity labels the query texts must not collide with.
+
+    Returns:
+        Dict mapping each attribute label to the query text the model sees.
+
+    Raises:
+        TypeError: If a group is not an AttributeGroup.
+        ValueError: If a group or label is invalid, or a query text collides with
+            an entity label.
+    """
+    reserved = {"text", "confidence", "start", "end"}
+    seen: Dict[str, str] = {}
+    for group_name, group in groups.items():
+        if not isinstance(group, AttributeGroup):
+            raise TypeError(f"Attribute group '{group_name}' must be an AttributeGroup")
+        if not group_name or group_name in reserved:
+            raise ValueError(
+                f"Invalid attribute group name {group_name!r}: must be non-empty "
+                f"and not one of {sorted(reserved)}"
+            )
+        if not group.labels:
+            raise ValueError(f"Attribute group '{group_name}' has no labels")
+        if not 0.0 <= group.threshold <= 1.0:
+            raise ValueError(
+                f"Attribute group '{group_name}' threshold must be in [0, 1], "
+                f"got {group.threshold}"
+            )
+        group_seen = set()
+        for label in group.labels:
+            if not label or not label.strip():
+                raise ValueError(f"Attribute group '{group_name}' has an empty label")
+            if label in group_seen:
+                raise ValueError(f"Label '{label}' is duplicated within group '{group_name}'")
+            group_seen.add(label)
+            if label in seen:
+                raise ValueError(
+                    f"Label '{label}' is in both '{seen[label]}' and '{group_name}'"
+                )
+            seen[label] = group_name
+
+    prompt_labels = {
+        label: f"{group_name}: {label}" if group.qualify_labels else label
+        for group_name, group in groups.items()
+        for label in group.labels
+    }
+    collisions = set(prompt_labels.values()) & set(entity_labels)
+    if collisions:
+        raise ValueError(
+            "Attribute labels collide with entity labels: "
+            f"{sorted(collisions)}; use qualify_labels=True"
+        )
+    return prompt_labels
 
 
 class StructureBuilder:
@@ -384,24 +445,9 @@ class Schema:
             raise ValueError("entity_attributes() requires entities() to be called first")
 
         groups = groups or {}
-        reserved = {"text", "confidence", "start", "end"}
-        seen: Dict[str, str] = {}
         content_entities = set(self._entity_order)
+        prompt_labels = attribute_prompt_labels(groups, content_entities)
         for group_name, group in groups.items():
-            if not isinstance(group, AttributeGroup):
-                raise TypeError(f"Attribute group '{group_name}' must be an AttributeGroup")
-            if not group_name or group_name in reserved:
-                raise ValueError(
-                    f"Invalid attribute group name {group_name!r}: must be non-empty "
-                    f"and not one of {sorted(reserved)}"
-                )
-            if not group.labels:
-                raise ValueError(f"Attribute group '{group_name}' has no labels")
-            if not 0.0 <= group.threshold <= 1.0:
-                raise ValueError(
-                    f"Attribute group '{group_name}' threshold must be in [0, 1], "
-                    f"got {group.threshold}"
-                )
             if group.applies_to is not None:
                 unknown = set(group.applies_to) - content_entities
                 if unknown:
@@ -409,31 +455,7 @@ class Schema:
                         f"Attribute group '{group_name}' applies to unknown entities: "
                         f"{sorted(unknown)}"
                     )
-            group_seen = set()
-            for label in group.labels:
-                if not label or not label.strip():
-                    raise ValueError(f"Attribute group '{group_name}' has an empty label")
-                if label in group_seen:
-                    raise ValueError(f"Label '{label}' is duplicated within group '{group_name}'")
-                group_seen.add(label)
-                if label in seen:
-                    raise ValueError(
-                        f"Label '{label}' is in both '{seen[label]}' and '{group_name}'"
-                    )
-                seen[label] = group_name
-
-        prompt_labels = {
-            label: f"{group_name}: {label}" if group.qualify_labels else label
-            for group_name, group in groups.items()
-            for label in group.labels
-        }
         attribute_labels = set(prompt_labels.values())
-        collisions = attribute_labels & content_entities
-        if collisions:
-            raise ValueError(
-                "Attribute labels collide with entity labels: "
-                f"{sorted(collisions)}; use qualify_labels=True"
-            )
 
         # Replace prior configuration cleanly when this method is called again.
         for label in self._entity_attribute_labels:

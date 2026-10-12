@@ -49,6 +49,7 @@ Load from JSONL:
 
 from __future__ import annotations
 
+import copy
 import json
 import random
 from dataclasses import dataclass, field
@@ -59,6 +60,7 @@ from typing import (
 from collections import Counter
 from tqdm import tqdm
 
+from gliner2.processing.attributes import entity_mention_value, expand_entity_attributes
 from gliner2.processing.targets import SurfaceSpan
 
 if TYPE_CHECKING:
@@ -83,6 +85,13 @@ def _is_locatable(value: Any, text: str) -> bool:
     if isinstance(value, str):
         return value.lower() in text.lower()
     return False
+
+
+def _entity_is_locatable(value: Any, text: str) -> bool:
+    try:
+        return _is_locatable(entity_mention_value(value), text)
+    except (TypeError, ValueError):
+        return False
 
 
 class DataValidationError(Exception):
@@ -404,6 +413,24 @@ TrainDataInput = Union[
 # =============================================================================
 
 @dataclass
+class AttributeLabels:
+    """Training vocabulary for one group of entity attributes.
+
+    ``qualify_labels`` must match inference because it changes query names.
+    Output selection settings belong to the inference ``AttributeGroup``.
+    """
+
+    labels: List[str]
+    qualify_labels: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = {"labels": self.labels}
+        if self.qualify_labels is not False:
+            result["qualify_labels"] = self.qualify_labels
+        return result
+
+
+@dataclass
 class Classification:
     """
     A classification task definition.
@@ -719,6 +746,10 @@ class InputExample:
         Structured data extractions for this example.
     relations : List[Relation], optional
         Relation extractions for this example.
+    entity_attributes : Dict[str, AttributeLabels], optional
+        Attribute label sets. Entity mentions can carry an ``attributes`` mapping
+        from group name to a label or label list. Missing groups add no positive
+        targets; an empty list explicitly annotates an empty label set.
 
     Examples
     --------
@@ -737,6 +768,7 @@ class InputExample:
     classifications: Optional[List[Classification]] = None
     structures: Optional[List[Structure]] = None
     relations: Optional[List[Relation]] = None
+    entity_attributes: Optional[Dict[str, AttributeLabels]] = None
 
     def __post_init__(self):
         if self.entities is None:
@@ -774,8 +806,9 @@ class InputExample:
                 if not entity_type:
                     errors.append("Entity type cannot be empty")
                 for mention in mentions:
-                    if not _is_locatable(mention, self.text):
+                    if not _entity_is_locatable(mention, self.text):
                         errors.append(f"Entity '{mention}' (type: {entity_type}) not found in text")
+        errors.extend(self._attribute_errors())
 
         for cls in self.classifications:
             errors.extend(cls.validate())
@@ -803,6 +836,19 @@ class InputExample:
         """Check if this example is valid."""
         return len(self.validate()) == 0
 
+    def _attribute_errors(self) -> List[str]:
+        try:
+            groups = {}
+            for name, group in (self.entity_attributes or {}).items():
+                if not isinstance(group, AttributeLabels):
+                    raise ValueError(f"attribute group {name!r} must be AttributeLabels")
+                groups[name] = group.to_dict()
+            output = {"entities": self.entities, "entity_attributes": groups}
+            expand_entity_attributes(copy.deepcopy(output))
+        except (TypeError, ValueError) as error:
+            return [str(error)]
+        return []
+
     def sanitize(self) -> Tuple[List[str], bool]:
         """
         Remove invalid parts from this example, keeping only valid content.
@@ -826,6 +872,8 @@ class InputExample:
         if not self.text or not self.text.strip():
             warnings.append("Text is empty")
             return warnings, False
+
+        attribute_errors = self._attribute_errors()
         
         # 1. Sanitize entities - drop entity type if any mention not found
         if self.entities:
@@ -839,13 +887,16 @@ class InputExample:
                 # Check if any mention is not in text
                 has_invalid = False
                 for mention in mentions:
-                    if not _is_locatable(mention, self.text):
+                    if not _entity_is_locatable(mention, self.text):
                         has_invalid = True
                         warnings.append(f"Entity '{mention}' (type: {entity_type}) not found in text - dropping entity type")
                         break
                 
                 if has_invalid:
                     types_to_remove.append(entity_type)
+
+            if types_to_remove and self.entity_attributes:
+                attribute_errors.append("An attributed entity task has invalid mention locations")
             
             # Remove invalid entity types
             for entity_type in types_to_remove:
@@ -857,6 +908,15 @@ class InputExample:
                 for desc_type in desc_to_remove:
                     del self.entity_descriptions[desc_type]
         
+        # Attribute supervision shares span queries across entity types. Reject
+        # the entity task atomically when its labels are invalid or conflicting,
+        # rather than turn removed positives into negative training targets.
+        if attribute_errors:
+            warnings.append(f"Invalid entity attributes - dropping entity task: {attribute_errors[0]}")
+            self.entities = {}
+            self.entity_descriptions = None
+            self.entity_attributes = None
+
         # 2. Sanitize classifications - drop individual invalid ones
         if self.classifications:
             valid_classifications = []
@@ -1004,6 +1064,10 @@ class InputExample:
                 output["record_metadata"] = record_metadata
         if self.relations:
             output["relations"] = [rel.to_dict() for rel in self.relations]
+        if self.entity_attributes is not None:
+            output["entity_attributes"] = {
+                name: group.to_dict() for name, group in self.entity_attributes.items()
+            }
         return {"input": self.text, "output": output}
 
     def to_json(self) -> str:
@@ -1017,6 +1081,10 @@ class InputExample:
 
         entities = output.get("entities")
         entity_descriptions = output.get("entity_descriptions")
+        entity_attributes = {
+            name: AttributeLabels(**config)
+            for name, config in output.get("entity_attributes", {}).items()
+        }
 
         classifications = []
         for cls_data in output.get("classifications", []):
@@ -1065,7 +1133,8 @@ class InputExample:
             entity_descriptions=entity_descriptions,
             classifications=classifications if classifications else None,
             structures=structures if structures else None,
-            relations=relations if relations else None
+            relations=relations if relations else None,
+            entity_attributes=entity_attributes or None,
         )
 
     @classmethod

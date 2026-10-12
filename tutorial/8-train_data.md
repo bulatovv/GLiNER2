@@ -2,7 +2,7 @@
 
 GLiNER2 uses JSONL format where each line contains an `input` and `output` field (or alternatively `text` and `schema`). The `input`/`text` is the text to process, and the `output`/`schema` is the schema with labels/annotations.
 
-Training data covers **entities, classifications, json structures, and relations**. The same JSONL format is used for span and boundary (`GLiNER2.5`) models. Span-attribute labels are inferred at inference from entity spans; there is no separate attribute field in JSONL yet.
+Training data covers **entities, entity attributes, classifications, json structures, and relations**. The same JSONL format is used for span and boundary (`GLiNER2.5`) models.
 
 ## Quick Format Reference
 
@@ -26,6 +26,7 @@ Both formats are equivalent - use whichever is more convenient for your workflow
 |-----|------|----------|-------------|
 | `entities` | `dict[str, list[str]]` | No | Entity type → list of entity mentions |
 | `entity_descriptions` | `dict[str, str]` | No | Entity type → description |
+| `entity_attributes` | `dict[str, dict]` | No | Attribute group → label vocabulary and optional query qualification |
 | `classifications` | `list[dict]` | No | List of classification tasks |
 | `json_structures` | `list[dict]` | No | List of structured data extractions |
 | `json_descriptions` | `dict[str, dict[str, str]]` | No | Parent → field → description |
@@ -121,6 +122,22 @@ Entity mentions, structure field values and relation field values are normally s
 | `end` | `int` | Yes | Character offset, exclusive |
 
 ---
+
+### Entity Attributes
+
+Declare group labels and attach gold values to entity mentions. Values can be one
+label or a list; offsets distinguish repeated text.
+
+```jsonl
+{"input": "Alice smiled. Alice frowned.", "output": {"entities": {"person": [{"text": "Alice", "start": 0, "end": 5, "attributes": {"sentiment": "positive"}}, {"text": "Alice", "start": 14, "end": 19, "attributes": {"sentiment": "negative"}}]}, "entity_attributes": {"sentiment": {"labels": ["positive", "negative"], "qualify_labels": true}}}}
+```
+
+`qualify_labels` defaults to `false` and must match inference query naming.
+Omitted groups add no positive targets; `[]` explicitly annotates an empty set.
+Declared labels without positives receive negative supervision. Partial annotation
+is not represented. `multi_label`, `threshold` and `applies_to` belong to inference.
+Invalid attribute annotations cause validated loading to drop the entity task,
+keeping other valid tasks. See [the Python example](13-span_attributes.md#training-attributes).
 
 ## 1. Classification Tasks
 
