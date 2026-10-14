@@ -740,6 +740,8 @@ class InputExample:
         Descriptions for entity types. Every described type is part of this
         example's label set, so a described type with no mentions is added to
         ``entities`` with an empty list and trained as a negative.
+    entity_prompt : str, optional
+        Instruction shared by all entity types, retained during augmentation.
     classifications : List[Classification], optional
         Classification tasks for this example.
     structures : List[Structure], optional
@@ -769,6 +771,7 @@ class InputExample:
     structures: Optional[List[Structure]] = None
     relations: Optional[List[Relation]] = None
     entity_attributes: Optional[Dict[str, AttributeLabels]] = None
+    entity_prompt: Optional[str] = None
 
     def __post_init__(self):
         if self.entities is None:
@@ -809,6 +812,7 @@ class InputExample:
                     if not _entity_is_locatable(mention, self.text):
                         errors.append(f"Entity '{mention}' (type: {entity_type}) not found in text")
         errors.extend(self._attribute_errors())
+        errors.extend(self._entity_prompt_errors())
 
         for cls in self.classifications:
             errors.extend(cls.validate())
@@ -849,6 +853,15 @@ class InputExample:
             return [str(error)]
         return []
 
+    def _entity_prompt_errors(self) -> List[str]:
+        if self.entity_prompt is None:
+            return []
+        if not isinstance(self.entity_prompt, str):
+            return ["entity_prompt must be a string"]
+        if not self.entities:
+            return ["entity_prompt requires entities"]
+        return []
+
     def sanitize(self) -> Tuple[List[str], bool]:
         """
         Remove invalid parts from this example, keeping only valid content.
@@ -874,6 +887,7 @@ class InputExample:
             return warnings, False
 
         attribute_errors = self._attribute_errors()
+        prompt_errors = self._entity_prompt_errors()
         
         # 1. Sanitize entities - drop entity type if any mention not found
         if self.entities:
@@ -916,6 +930,14 @@ class InputExample:
             self.entities = {}
             self.entity_descriptions = None
             self.entity_attributes = None
+
+        if prompt_errors:
+            warnings.append(f"Invalid entity prompt - dropping entity task: {prompt_errors[0]}")
+            self.entities = {}
+            self.entity_descriptions = None
+            self.entity_attributes = None
+        if not self.entities:
+            self.entity_prompt = None
 
         # 2. Sanitize classifications - drop individual invalid ones
         if self.classifications:
@@ -1045,6 +1067,8 @@ class InputExample:
             output["entities"] = self.entities
         if self.entity_descriptions:
             output["entity_descriptions"] = self.entity_descriptions
+        if self.entity_prompt is not None:
+            output["entity_prompt"] = self.entity_prompt
         if self.classifications:
             output["classifications"] = [cls.to_dict() for cls in self.classifications]
         if self.structures:
@@ -1081,6 +1105,7 @@ class InputExample:
 
         entities = output.get("entities")
         entity_descriptions = output.get("entity_descriptions")
+        entity_prompt = output.get("entity_prompt")
         entity_attributes = {
             name: AttributeLabels(**config)
             for name, config in output.get("entity_attributes", {}).items()
@@ -1131,6 +1156,7 @@ class InputExample:
             text=text,
             entities=entities,
             entity_descriptions=entity_descriptions,
+            entity_prompt=entity_prompt,
             classifications=classifications if classifications else None,
             structures=structures if structures else None,
             relations=relations if relations else None,

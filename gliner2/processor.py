@@ -1119,6 +1119,9 @@ class SchemaTransformer:
             return
 
         entity_fields = list(schema["entities"].keys())
+        prompt = schema.get("entity_prompt")
+        if prompt is not None and not isinstance(prompt, str):
+            raise TypeError("entity_prompt must be a string")
         descs = schema.get("entity_descriptions", {})
         example_modes = ["none", "descriptions"]
 
@@ -1155,7 +1158,8 @@ class SchemaTransformer:
 
             schemas.append(
                 self._transform_schema(
-                    "entities", chosen, self.E_TOKEN, label_descriptions=descs, example_mode=mode
+                    "entities", chosen, self.E_TOKEN, prompt=prompt,
+                    label_descriptions=descs, example_mode=mode,
                 )
             )
             types.append("entities")

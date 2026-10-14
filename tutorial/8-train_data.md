@@ -26,6 +26,7 @@ Both formats are equivalent - use whichever is more convenient for your workflow
 |-----|------|----------|-------------|
 | `entities` | `dict[str, list[str]]` | No | Entity type → list of entity mentions |
 | `entity_descriptions` | `dict[str, str]` | No | Entity type → description |
+| `entity_prompt` | `str` | No | Shared entity-extraction instruction, retained during augmentation |
 | `entity_attributes` | `dict[str, dict]` | No | Attribute group → label vocabulary and optional query qualification |
 | `classifications` | `list[dict]` | No | List of classification tasks |
 | `json_structures` | `list[dict]` | No | List of structured data extractions |
@@ -224,6 +225,16 @@ Both formats are supported - use list for consistency or string for brevity:
 ```jsonl
 {"input": "Dr. Sarah Johnson prescribed Metformin 500mg twice daily for diabetes treatment.", "output": {"entities": {"person": ["Dr. Sarah Johnson"], "medication": ["Metformin"], "dosage": ["500mg"], "condition": ["diabetes"]}, "entity_descriptions": {"person": "Names of people mentioned in the text", "medication": "Names of drugs or pharmaceutical products", "dosage": "Specific amounts or dosages of medications", "condition": "Medical conditions or diseases"}}}
 ```
+
+### NER with a Shared Prompt
+
+`entity_prompt` provides input context for the entity group, independently of type descriptions:
+
+```jsonl
+{"input": "Operator: House 12? Customer: No, house 14.", "output": {"entity_prompt": "Extract the customer's address, not the operator's suggestion.", "entities": {"building_number": ["14"]}, "entity_descriptions": {"building_number": "House number"}}}
+```
+
+In Python, pass the same `entity_prompt` argument to `InputExample`.
 
 ### NER with Multiple Instances of Same Entity Type
 

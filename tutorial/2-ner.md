@@ -5,6 +5,7 @@ Learn how to extract named entities from text using GLiNER2's flexible entity re
 ## Table of Contents
 - [Basic Entity Extraction](#basic-entity-extraction)
 - [Entity Extraction with Descriptions](#entity-extraction-with-descriptions)
+- [Entity Extraction with a Prompt](#entity-extraction-with-a-prompt)
 - [Single vs Multiple Entities](#single-vs-multiple-entities)
 - [Custom Thresholds](#custom-thresholds)
 - [Advanced Configuration](#advanced-configuration)
@@ -80,6 +81,22 @@ print(results)
 #     }
 # }
 ```
+
+## Entity Extraction with a Prompt
+
+For local extraction, `prompt` adds an instruction shared by all entity types:
+
+```python
+schema = extractor.create_schema().entities(
+    {"building_number": "House number"},
+    prompt="Extract the customer's address, not the operator's suggestion.",
+)
+text = "Operator: House 12? Customer: No, house 14."
+results = extractor.extract(text, schema)
+```
+
+The `extract_entities` helpers also accept `prompt`. During training, the prompt
+is retained even when augmentation hides entity descriptions or renames labels.
 
 ## Single vs Multiple Entities
 

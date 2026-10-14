@@ -1759,9 +1759,11 @@ class ExtractorRuntimeMixin:
         include_spans: bool = False,
         max_len: Optional[int] = None,
         overlap_policy: Optional[str] = None,
+        *,
+        prompt: Optional[str] = None,
     ) -> Dict:
-        """Extract entities from text."""
-        schema = self.create_schema().entities(entity_types)
+        """Extract entities with an optional prompt shared by all entity types."""
+        schema = self.create_schema().entities(entity_types, prompt=prompt)
         return self.extract(
             text,
             schema,
@@ -1786,9 +1788,11 @@ class ExtractorRuntimeMixin:
         include_confidence: bool = False,
         include_spans: bool = False,
         overlap_policy: Optional[str] = None,
+        *,
+        prompt: Optional[str] = None,
     ) -> Dict:
         """Extract entities from a long document with overlapping word chunks."""
-        schema = self.create_schema().entities(entity_types)
+        schema = self.create_schema().entities(entity_types, prompt=prompt)
         return self.extract_long(
             text,
             schema,
@@ -1814,9 +1818,11 @@ class ExtractorRuntimeMixin:
         include_spans: bool = False,
         max_len: Optional[int] = None,
         overlap_policy: Optional[str] = None,
+        *,
+        prompt: Optional[str] = None,
     ) -> List[Dict]:
         """Batch extract entities."""
-        schema = self.create_schema().entities(entity_types)
+        schema = self.create_schema().entities(entity_types, prompt=prompt)
         return self.batch_extract(
             texts,
             schema,
@@ -1843,9 +1849,11 @@ class ExtractorRuntimeMixin:
         chunk_size: int = 384,
         chunk_overlap: int = 64,
         overlap_policy: Optional[str] = None,
+        *,
+        prompt: Optional[str] = None,
     ) -> List[Dict]:
         """Batch extract entities from long documents with overlapping word chunks."""
-        schema = self.create_schema().entities(entity_types)
+        schema = self.create_schema().entities(entity_types, prompt=prompt)
         return self.batch_extract_long(
             texts,
             schema,

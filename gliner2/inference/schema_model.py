@@ -171,6 +171,7 @@ class SchemaInput(_StrictInput):
 
     Args:
         entities: List of entity types, or a mapping of type to description or config
+        entity_prompt: Optional instruction shared by all entity types
         structures: Dict mapping structure names to structure definitions
         classifications: List of classification task definitions
         relations: List of relation types, or a mapping of type to description or config
@@ -180,6 +181,7 @@ class SchemaInput(_StrictInput):
         default=None,
         description="Entity types"
     )
+    entity_prompt: Optional[str] = None
     structures: Optional[Dict[str, StructureInput]] = Field(
         default=None,
         description="Structure definitions"
@@ -268,4 +270,6 @@ class SchemaInput(_StrictInput):
             )
         if self.entity_attributes is not None and self.entities is None:
             raise ValueError("entity_attributes requires entities")
+        if self.entity_prompt is not None and self.entities is None:
+            raise ValueError("entity_prompt requires entities")
         return self

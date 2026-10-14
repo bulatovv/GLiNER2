@@ -407,13 +407,29 @@ class Schema:
         dtype: Literal["str", "list"] = "list",
         threshold: Optional[float] = None,
         validators: Optional[List[RegexValidator]] = None,
+        *,
+        prompt: Optional[str] = None,
     ) -> "Schema":
-        """Add entity extraction task."""
+        """Add entity types with an optional prompt shared by the entity group.
+
+        The prompt is retained during schema augmentation. Repeated calls add
+        types to the same group and must not specify conflicting prompts.
+        """
+        if prompt is not None:
+            if not isinstance(prompt, str):
+                raise TypeError("entity prompt must be a string")
+            if "entity_prompt" in self.schema and self.schema["entity_prompt"] != prompt:
+                raise ValueError(
+                    "entity types share one prompt; conflicting prompts are not supported"
+                )
         if self._active_builder:
             self._active_builder._auto_finish()
             self._active_builder = None
 
         entities = self._parse_entity_input(entity_types)
+
+        if prompt is not None:
+            self.schema["entity_prompt"] = prompt
 
         for name, config in entities.items():
             self.schema["entities"][name] = ""
@@ -544,7 +560,7 @@ class Schema:
 
         Args:
             data: Dictionary with optional keys: entities, structures,
-                  classifications, relations, entity_attributes
+                  classifications, relations, entity_attributes, entity_prompt
 
         Returns:
             Schema: Constructed schema instance
@@ -576,7 +592,7 @@ class Schema:
         schema = cls()
 
         if validated.entities is not None:
-            schema.entities(_configs_to_builder(validated.entities))
+            schema.entities(_configs_to_builder(validated.entities), prompt=validated.entity_prompt)
             if validated.entity_attributes is not None:
                 schema.entity_attributes(
                     {
@@ -670,6 +686,8 @@ class Schema:
         result = {}
 
         if self._entity_order:
+            if "entity_prompt" in self.schema:
+                result["entity_prompt"] = self.schema["entity_prompt"]
             entity_configs = {}
             for name in self._entity_order:
                 config = {}
